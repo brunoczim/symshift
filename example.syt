@@ -1,0 +1,23 @@
+type Phoneme = a e o p t k n l s
+
+pattern Vowel : Alphabet = a | e | o
+
+pattern Voiced: Alphabet = Vowel | n | l 
+
+type Phone = a e o p b t d k g n l s z ŋ
+
+function toPhonetics: Phoneme -> Phone;
+a = a;
+e = e;
+o = o;
+{Voiced}, p, {Voiced} = b;
+p = p;
+{Voiced}, t, {Voiced} = d;
+t = t;
+{Voiced}, k, {Voiced} = g;
+k = k;
+{Voiced}, s, {Voiced} = z;
+s = s;
+l = l;
+n, {k} = ŋ;
+n = n;
