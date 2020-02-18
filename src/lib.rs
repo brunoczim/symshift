@@ -308,6 +308,30 @@ where
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct Optional<P>
+where
+    P: Pattern,
+{
+    pub inner: P,
+}
+
+impl<P> Pattern for Optional<P>
+where
+    P: Pattern,
+{
+    type Symbol = P::Symbol;
+
+    fn test_match(&self, symbols: &[Self::Symbol]) -> Match {
+        let mtch = self.inner.test_match(symbols);
+        if mtch.kind == MatchKind::Neg {
+            Match { kind: MatchKind::Pos, start: 0, end: 0 }
+        } else {
+            mtch
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Repeat<P>
 where
     P: Pattern,
@@ -330,7 +354,7 @@ where
         let mut mtch = self.inner.test_match(symbols);
         let mut count = 1;
 
-        while let Some(_) = self.max.filter(|&max| max <= count) {
+        while self.max.filter(|&max| max <= count).is_none() {
             let prev = mtch.end;
             mtch = mtch.seq(&self.inner, symbols);
             if mtch.end == prev {
@@ -339,7 +363,7 @@ where
             count += 1;
         }
 
-        if let Some(_) = self.min.filter(|&min| min > count) {
+        if self.min.filter(|&min| min > count).is_some() {
             mtch.kind = MatchKind::Neg;
         }
         mtch
@@ -370,24 +394,36 @@ where
         let mut mtch = self.left.test_match(symbols);
         let mut count = 1;
 
-        while let Some(_) =
-            self.min.filter(|&max| max <= count).filter(|&min| min > count)
+        while self.max.filter(|&max| max <= count).is_none()
+            && self.min.filter(|&min| min > count).is_none()
         {
-            let prev = mtch.end;
-            mtch = mtch.seq(&self.left, symbols);
-            if mtch.end == prev {
+            let new_match = mtch.seq(&self.left, symbols);
+            if mtch.end == new_match.end {
                 break;
             }
+            mtch = new_match;
             count += 1;
         }
 
-        if let Some(_) = self.min.filter(|&min| min > count) {
+        if self.min.filter(|&min| min > count).is_some() {
             mtch.kind = MatchKind::Neg;
-        } else {
+        } else if mtch.kind != MatchKind::Neg {
             loop {
-                /*
-                 * TODO
-                 */
+                let new_match = mtch.seq(&self.right, symbols);
+                if self.max.filter(|&max| max <= count).is_some()
+                    || new_match.kind == MatchKind::Pos
+                {
+                    mtch = new_match;
+                    break;
+                }
+
+                let new_match = mtch.seq(&self.left, symbols);
+                if mtch.end == new_match.end {
+                    mtch.kind = MatchKind::Neg;
+                    break;
+                }
+                mtch = new_match;
+                count += 1;
             }
         }
 
