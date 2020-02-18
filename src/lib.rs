@@ -166,16 +166,16 @@ impl Match {
     where
         P: Pattern,
     {
-        let other = pattern.test_match(&symbols[self.end ..]);
+        let other = pattern.test_match(symbols, self.end);
 
         Match {
-            kind: if other.start != 0 {
+            kind: if other.start != self.end {
                 MatchKind::Neg
             } else {
                 self.kind & other.kind
             },
             start: self.start,
-            end: other.end + self.end,
+            end: other.end,
         }
     }
 }
@@ -183,7 +183,7 @@ impl Match {
 pub trait Pattern {
     type Symbol: Eq;
 
-    fn test_match(&self, symbols: &[Self::Symbol]) -> Match;
+    fn test_match(&self, symbols: &[Self::Symbol], cursor: usize) -> Match;
 }
 
 impl<'pat, P> Pattern for &'pat P
@@ -192,8 +192,8 @@ where
 {
     type Symbol = P::Symbol;
 
-    fn test_match(&self, symbols: &[Self::Symbol]) -> Match {
-        (**self).test_match(symbols)
+    fn test_match(&self, symbols: &[Self::Symbol], cursor: usize) -> Match {
+        (**self).test_match(symbols, cursor)
     }
 }
 
@@ -211,14 +211,18 @@ where
 {
     type Symbol = S;
 
-    fn test_match(&self, symbols: &[Self::Symbol]) -> Match {
-        for (i, symbol) in symbols.iter().enumerate() {
+    fn test_match(&self, symbols: &[Self::Symbol], cursor: usize) -> Match {
+        for (i, symbol) in symbols[cursor ..].iter().enumerate() {
             if symbol == &self.symbol {
-                return Match { kind: MatchKind::Pos, start: i, end: 1 };
+                return Match {
+                    kind: MatchKind::Pos,
+                    start: cursor + i,
+                    end: cursor + 1 + i,
+                };
             }
         }
 
-        Match { kind: MatchKind::Neg, start: 0, end: 1 }
+        Match { kind: MatchKind::Neg, start: cursor, end: cursor + 1 }
     }
 }
 
@@ -236,8 +240,8 @@ where
 {
     type Symbol = P::Symbol;
 
-    fn test_match(&self, symbols: &[Self::Symbol]) -> Match {
-        !self.inner.test_match(symbols)
+    fn test_match(&self, symbols: &[Self::Symbol], cursor: usize) -> Match {
+        !self.inner.test_match(symbols, cursor)
     }
 }
 
@@ -258,8 +262,9 @@ where
 {
     type Symbol = P1::Symbol;
 
-    fn test_match(&self, symbols: &[Self::Symbol]) -> Match {
-        self.left.test_match(symbols) & self.left.test_match(symbols)
+    fn test_match(&self, symbols: &[Self::Symbol], cursor: usize) -> Match {
+        self.left.test_match(symbols, cursor)
+            & self.left.test_match(symbols, cursor)
     }
 }
 
@@ -280,8 +285,9 @@ where
 {
     type Symbol = P1::Symbol;
 
-    fn test_match(&self, symbols: &[Self::Symbol]) -> Match {
-        self.left.test_match(symbols) | self.left.test_match(symbols)
+    fn test_match(&self, symbols: &[Self::Symbol], cursor: usize) -> Match {
+        self.left.test_match(symbols, cursor)
+            | self.left.test_match(symbols, cursor)
     }
 }
 
@@ -302,8 +308,8 @@ where
 {
     type Symbol = P1::Symbol;
 
-    fn test_match(&self, symbols: &[Self::Symbol]) -> Match {
-        self.left.test_match(symbols).seq(&self.right, symbols)
+    fn test_match(&self, symbols: &[Self::Symbol], cursor: usize) -> Match {
+        self.left.test_match(symbols, cursor).seq(&self.right, symbols)
     }
 }
 
@@ -321,10 +327,10 @@ where
 {
     type Symbol = P::Symbol;
 
-    fn test_match(&self, symbols: &[Self::Symbol]) -> Match {
-        let mtch = self.inner.test_match(symbols);
+    fn test_match(&self, symbols: &[Self::Symbol], cursor: usize) -> Match {
+        let mtch = self.inner.test_match(symbols, cursor);
         if mtch.kind == MatchKind::Neg {
-            Match { kind: MatchKind::Pos, start: 0, end: 0 }
+            Match { kind: MatchKind::Pos, start: cursor, end: cursor }
         } else {
             mtch
         }
@@ -347,11 +353,11 @@ where
 {
     type Symbol = P::Symbol;
 
-    fn test_match(&self, symbols: &[Self::Symbol]) -> Match {
+    fn test_match(&self, symbols: &[Self::Symbol], cursor: usize) -> Match {
         if self.max == Some(0) {
-            return Match { kind: MatchKind::Pos, start: 0, end: 0 };
+            return Match { kind: MatchKind::Pos, start: cursor, end: cursor };
         }
-        let mut mtch = self.inner.test_match(symbols);
+        let mut mtch = self.inner.test_match(symbols, cursor);
         let mut count = 1;
 
         while self.max.filter(|&max| max <= count).is_none() {
@@ -387,11 +393,11 @@ where
 {
     type Symbol = P::Symbol;
 
-    fn test_match(&self, symbols: &[Self::Symbol]) -> Match {
+    fn test_match(&self, symbols: &[Self::Symbol], cursor: usize) -> Match {
         if self.max == Some(0) {
-            return self.right.test_match(symbols);
+            return self.right.test_match(symbols, cursor);
         }
-        let mut mtch = self.left.test_match(symbols);
+        let mut mtch = self.left.test_match(symbols, cursor);
         let mut count = 1;
 
         while self.max.filter(|&max| max <= count).is_none()
