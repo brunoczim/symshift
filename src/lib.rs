@@ -1,4 +1,13 @@
-use std::ops::{BitAnd, BitOr, BitXor, Not as OpNot, Range};
+use std::ops::{
+    BitAnd,
+    BitAndAssign,
+    BitOr,
+    BitOrAssign,
+    BitXor,
+    BitXorAssign,
+    Not as OpNot,
+    Range,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum MatchKind {
@@ -34,6 +43,12 @@ impl BitAnd for MatchKind {
     }
 }
 
+impl BitAndAssign for MatchKind {
+    fn bitand_assign(&mut self, other: Self) {
+        *self = *self & other;
+    }
+}
+
 impl BitOr for MatchKind {
     type Output = Self;
 
@@ -42,6 +57,12 @@ impl BitOr for MatchKind {
             (Self::Neg, Self::Neg) => Self::Neg,
             _ => Self::Pos,
         }
+    }
+}
+
+impl BitOrAssign for MatchKind {
+    fn bitor_assign(&mut self, other: Self) {
+        *self = *self | other;
     }
 }
 
@@ -54,6 +75,12 @@ impl BitXor for MatchKind {
         } else {
             Self::Pos
         }
+    }
+}
+
+impl BitXorAssign for MatchKind {
+    fn bitxor_assign(&mut self, other: Self) {
+        *self = *self ^ other;
     }
 }
 
@@ -93,6 +120,12 @@ impl BitAnd for Match {
     }
 }
 
+impl BitAndAssign for Match {
+    fn bitand_assign(&mut self, other: Self) {
+        *self = *self & other;
+    }
+}
+
 impl BitOr for Match {
     type Output = Self;
 
@@ -114,6 +147,12 @@ impl BitOr for Match {
     }
 }
 
+impl BitOrAssign for Match {
+    fn bitor_assign(&mut self, other: Self) {
+        *self = *self | other;
+    }
+}
+
 impl Match {
     pub fn range(self) -> Range<usize> {
         self.start .. self.end
@@ -122,12 +161,40 @@ impl Match {
     pub fn len(self) -> usize {
         self.end - self.start
     }
+
+    pub fn seq<P>(self, pattern: P, symbols: &[P::Symbol]) -> Self
+    where
+        P: Pattern,
+    {
+        let other = pattern.test_match(&symbols[self.end ..]);
+
+        Match {
+            kind: if other.start != 0 {
+                MatchKind::Neg
+            } else {
+                self.kind & other.kind
+            },
+            start: self.start,
+            end: other.end + self.end,
+        }
+    }
 }
 
 pub trait Pattern {
     type Symbol: Eq;
 
     fn test_match(&self, symbols: &[Self::Symbol]) -> Match;
+}
+
+impl<'pat, P> Pattern for &'pat P
+where
+    P: Pattern,
+{
+    type Symbol = P::Symbol;
+
+    fn test_match(&self, symbols: &[Self::Symbol]) -> Match {
+        (**self).test_match(symbols)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -236,6 +303,94 @@ where
     type Symbol = P1::Symbol;
 
     fn test_match(&self, symbols: &[Self::Symbol]) -> Match {
-        let left = self.left.test_match(symbols);
+        self.left.test_match(symbols).seq(&self.right, symbols)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct Repeat<P>
+where
+    P: Pattern,
+{
+    pub inner: P,
+    pub min: Option<usize>,
+    pub max: Option<usize>,
+}
+
+impl<P> Pattern for Repeat<P>
+where
+    P: Pattern,
+{
+    type Symbol = P::Symbol;
+
+    fn test_match(&self, symbols: &[Self::Symbol]) -> Match {
+        if self.max == Some(0) {
+            return Match { kind: MatchKind::Pos, start: 0, end: 0 };
+        }
+        let mut mtch = self.inner.test_match(symbols);
+        let mut count = 1;
+
+        while let Some(_) = self.max.filter(|&max| max <= count) {
+            let prev = mtch.end;
+            mtch = mtch.seq(&self.inner, symbols);
+            if mtch.end == prev {
+                break;
+            }
+            count += 1;
+        }
+
+        if let Some(_) = self.min.filter(|&min| min > count) {
+            mtch.kind = MatchKind::Neg;
+        }
+        mtch
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct LazyRepeat<P>
+where
+    P: Pattern,
+{
+    pub left: P,
+    pub right: P,
+    pub min: Option<usize>,
+    pub max: Option<usize>,
+}
+
+impl<P> Pattern for LazyRepeat<P>
+where
+    P: Pattern,
+{
+    type Symbol = P::Symbol;
+
+    fn test_match(&self, symbols: &[Self::Symbol]) -> Match {
+        if self.max == Some(0) {
+            return self.right.test_match(symbols);
+        }
+        let mut mtch = self.left.test_match(symbols);
+        let mut count = 1;
+
+        while let Some(_) =
+            self.min.filter(|&max| max <= count).filter(|&min| min > count)
+        {
+            let prev = mtch.end;
+            mtch = mtch.seq(&self.left, symbols);
+            if mtch.end == prev {
+                break;
+            }
+            count += 1;
+        }
+
+        if let Some(_) = self.min.filter(|&min| min > count) {
+            mtch.kind = MatchKind::Neg;
+        } else {
+            loop {
+                /*
+                 * TODO
+                 */
+            }
+        }
+
+        mtch
     }
 }
